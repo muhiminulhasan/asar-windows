@@ -17,6 +17,12 @@ target_include_directories(test_asarfolder PRIVATE
     ${CMAKE_SOURCE_DIR}
 )
 target_link_libraries(test_asarfolder PRIVATE libasar shell32 ole32 uuid)
+# The test registers asarfolder.dll from its own directory (see
+# RegisterExtensionForTest), so the DLL must sit next to the exe.
+add_dependencies(test_asarfolder asarfolder)
+add_custom_command(TARGET test_asarfolder POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:asarfolder> $<TARGET_FILE_DIR:test_asarfolder>)
 
 add_executable(test_capi test_capi.cpp)
 target_include_directories(test_capi PRIVATE

@@ -33,6 +33,114 @@ static int g_failures = 0;
 static const GUID kAsarFolderId = {
     0x8AF8F867, 0xE3EA, 0x40B8, {0x8A, 0x87, 0x94, 0x2E, 0xD2, 0xA3, 0xDF, 0x0D}};
 
+// --- Self-registration -----------------------------------------------------
+// The shell only routes .asar binds to our StorageHandler when
+// asarfolder.dll is registered under HKCU and the .asar extension points at
+// the ProgID. The test registers the DLL next to itself (CMake copies it
+// there) and adds the association, then restores both at the end.
+static HMODULE g_hExtDll = nullptr;
+static bool g_assocTouched = false;
+static bool g_assocExisted = false;
+static std::wstring g_assocOld;
+static std::wstring g_prevDllPath;  // asarfolder.dll registered before the test
+
+typedef HRESULT(STDAPICALLTYPE* DllRegFn)(void);
+
+static bool RegisterExtensionForTest(void) {
+    // If a copy is already registered (dev machine), remember which DLL so we
+    // can re-register it afterwards; DllUnregisterServer would otherwise wipe
+    // the user's installed Explorer integration.
+    HKEY hPrev = nullptr;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER,
+                      L"Software\\Classes\\CLSID\\{8AF8F867-E3EA-40B8-8A87-"
+                      L"942ED2A3DF0D}\\InProcServer32",
+                      0, KEY_READ, &hPrev) == ERROR_SUCCESS) {
+        wchar_t buf[MAX_PATH] = {};
+        DWORD cb = sizeof(buf), type = 0;
+        if (RegQueryValueExW(hPrev, nullptr, nullptr, &type,
+                             reinterpret_cast<BYTE*>(buf),
+                             &cb) == ERROR_SUCCESS &&
+            type == REG_SZ)
+            g_prevDllPath = buf;
+        RegCloseKey(hPrev);
+    }
+
+    wchar_t exePath[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    fs::path dll = fs::path(exePath).parent_path() / L"asarfolder.dll";
+    g_hExtDll = LoadLibraryW(dll.c_str());
+    if (!g_hExtDll) {
+        std::printf("note: LoadLibrary(%ls) failed %lu\n", dll.c_str(),
+                    GetLastError());
+        return false;
+    }
+    auto reg = reinterpret_cast<DllRegFn>(GetProcAddress(g_hExtDll,
+                                                         "DllRegisterServer"));
+    if (!reg || FAILED(reg())) {
+        std::printf("note: DllRegisterServer failed\n");
+        return false;
+    }
+
+    // Associate .asar with the ProgID, saving any previous default value.
+    HKEY h = nullptr;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\.asar", 0,
+                        nullptr, REG_OPTION_NON_VOLATILE, KEY_READ | KEY_WRITE,
+                        nullptr, &h, nullptr) == ERROR_SUCCESS) {
+        wchar_t old[256] = {};
+        DWORD cb = sizeof(old), type = 0;
+        g_assocExisted = (RegQueryValueExW(h, nullptr, nullptr, &type,
+                                           reinterpret_cast<BYTE*>(old),
+                                           &cb) == ERROR_SUCCESS &&
+                          type == REG_SZ);
+        if (g_assocExisted) g_assocOld = old;
+        const wchar_t* progid = L"asar.Archive";
+        RegSetValueExW(h, nullptr, 0, REG_SZ,
+                       reinterpret_cast<const BYTE*>(progid),
+                       static_cast<DWORD>((wcslen(progid) + 1) *
+                                          sizeof(wchar_t)));
+        RegCloseKey(h);
+        g_assocTouched = true;
+    }
+    return true;
+}
+
+static void UnregisterExtensionForTest(void) {
+    if (g_assocTouched) {
+        HKEY h = nullptr;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\.asar", 0,
+                          KEY_WRITE, &h) == ERROR_SUCCESS) {
+            if (g_assocExisted) {
+                RegSetValueExW(h, nullptr, 0, REG_SZ,
+                               reinterpret_cast<const BYTE*>(g_assocOld.c_str()),
+                               static_cast<DWORD>((g_assocOld.size() + 1) *
+                                                  sizeof(wchar_t)));
+            } else {
+                RegDeleteValueW(h, nullptr);
+            }
+            RegCloseKey(h);
+        }
+        g_assocTouched = false;
+    }
+    if (g_hExtDll) {
+        auto unreg = reinterpret_cast<DllRegFn>(GetProcAddress(
+            g_hExtDll, "DllUnregisterServer"));
+        if (unreg) unreg();
+        FreeLibrary(g_hExtDll);
+        g_hExtDll = nullptr;
+    }
+    // Restore a pre-existing registration (overwritten above).
+    if (!g_prevDllPath.empty()) {
+        HMODULE hPrev = LoadLibraryW(g_prevDllPath.c_str());
+        if (hPrev) {
+            auto reReg = reinterpret_cast<DllRegFn>(GetProcAddress(
+                hPrev, "DllRegisterServer"));
+            if (reReg) reReg();
+            FreeLibrary(hPrev);
+        }
+        g_prevDllPath.clear();
+    }
+}
+
 int wmain(int argc, wchar_t** argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
     if (FAILED(CoInitializeEx(nullptr,
@@ -40,6 +148,7 @@ int wmain(int argc, wchar_t** argv) {
         std::printf("FAIL: CoInitializeEx\n");
         return 1;
     }
+    CHECK(RegisterExtensionForTest(), "register extension for test");
 
     // --- Build a sample archive with libasar. ---
     wchar_t tempRoot[MAX_PATH] = {};
@@ -99,7 +208,10 @@ int wmain(int argc, wchar_t** argv) {
         }
     }
     CHECK(hr == S_OK && folder, "bind .asar as shell folder");
-    if (!folder) return 1;
+    if (!folder) {
+        UnregisterExtensionForTest();
+        return 1;
+    }
 
     // --- Enumerate. ---
     IEnumIDList* enumIds = nullptr;
@@ -280,6 +392,7 @@ int wmain(int argc, wchar_t** argv) {
     desktop->Release();
     if (filePidl) ILFree(filePidl);
     fs::remove_all(root, ec);
+    UnregisterExtensionForTest();
     CoUninitialize();
 
     if (g_failures) {
