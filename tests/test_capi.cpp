@@ -98,11 +98,17 @@ int wmain() {
 
     // Add a file to the archive via the C API.
     const char extra[] = "extra!";
-    WriteFileBytes((root / L"extra.txt").wstring(), extra, sizeof(extra) - 1);
-    const wchar_t* sources[] = {(root / L"extra.txt").c_str()};
+    fs::path extraSrc = root / L"extra.txt";
+    WriteFileBytes(extraSrc.wstring(), extra, sizeof(extra) - 1);
+    const wchar_t* sources[] = {extraSrc.c_str()};
     int addRc = asar_add(archive.c_str(), sources, 1, L"added", 1);
-    if (addRc != 1)
-        std::printf("asar_add rc=%d\n", addRc);
+    if (addRc != 1) {
+        const wchar_t* le = asar_last_error();
+        char narrow[512] = {};
+        WideCharToMultiByte(CP_ACP, 0, le ? le : L"(no error)", -1,
+                            narrow, sizeof(narrow), nullptr, nullptr);
+        std::printf("asar_add rc=%d lastError='%s'\n", addRc, narrow);
+    }
     CHECK(addRc == 1, "asar_add count");
 
     // Reopen and verify the added entry.

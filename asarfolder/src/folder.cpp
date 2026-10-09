@@ -186,8 +186,12 @@ public:
         *ppv = nullptr;
         return E_NOINTERFACE;
     }
-    STDMETHOD_(ULONG, AddRef)() override { return 2; }
-    STDMETHOD_(ULONG, Release)() override { return 2; }
+    STDMETHOD_(ULONG, AddRef)() override { return InterlockedIncrement(&m_refs); }
+    STDMETHOD_(ULONG, Release)() override {
+        ULONG r = InterlockedDecrement(&m_refs);
+        if (r == 0) delete this;
+        return r;
+    }
 
     STDMETHOD(SetParentAndItem)(PIDLIST_ABSOLUTE pidlParent, IShellFolder* psf,
                                 PCUITEMID_CHILD) override {
@@ -209,6 +213,9 @@ public:
     STDMETHOD(GetParentAndItem)(PIDLIST_ABSOLUTE* ppidlParent, IShellFolder** ppsf,
                                 PITEMID_CHILD* ppidlChild) override {
         DbgLog("IParentAndItem::GetParentAndItem\r\n");
+        if (ppidlParent) *ppidlParent = nullptr;
+        if (ppsf) *ppsf = nullptr;
+        if (ppidlChild) *ppidlChild = nullptr;
         if (!m_parent) return E_FAIL;
 
         IShellFolder* parent = m_psf;
@@ -233,6 +240,7 @@ public:
     }
 
 private:
+    LONG m_refs = 1;
     PIDLIST_ABSOLUTE m_parent = nullptr;
     IShellFolder* m_psf = nullptr;
 };
@@ -361,7 +369,7 @@ public:
             cmp = _wcsicmp(m_path.c_str(), other);
             CoTaskMemFree(other);
         }
-        *piOrder = (hint & SICHINT_DISPLAY) && cmp == 0 ? 0 : (cmp == 0 ? 0 : 1);
+        *piOrder = cmp < 0 ? -1 : cmp > 0 ? 1 : 0;
         return S_OK;
     }
 

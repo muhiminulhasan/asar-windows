@@ -95,7 +95,8 @@ Each release ships **separate zips per architecture** (x64, x86, ARM64):
 | Zip | Contents | Use |
 |---|---|---|
 | `7z-plugin-<ver>-<arch>.zip` | `7z-asar.dll` | Copy into `<7-Zip>\Formats\` — .asar becomes a native archive type in 7-Zip |
-| `explorer-integration-<ver>-<arch>.zip` | `asarshell.dll`, `asarfolder.dll`, `asarview.exe`, `asar.exe`, `asar.ico` | The full Explorer experience: in-Explorer browsing, context menu, viewer, CLI |
+| `asarfolder-<ver>-<arch>.zip` | `asarfolder.dll`, `asar.ico` | Standalone: double-click .asar browses it inside Explorer (regsvr32 the dll) |
+| `explorer-tools-<ver>-<arch>.zip` | `asarshell.dll`, `asarview.exe`, `asar.exe`, `asar.ico` | Right-click Extract/Pack, viewer, CLI (pairs with asarfolder) |
 | `asar-lib-<ver>-<arch>.zip` | `asar.dll`, `asar.lib`, `asar_c.h` | For developers: use libasar from your own C/C++ programs via the C API |
 
 `install.ps1` (inside the explorer zip on releases; at `scripts\` in the repo)

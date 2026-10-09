@@ -41,11 +41,15 @@ jobs:
         shell: pwsh
         run: scripts/package.ps1 -Arch ${{ matrix.arch }} -BuildDir "build/${{ matrix.arch }}" -Version ${{ github.ref_name || '0.0.0' }}
 
-      - name: Upload artifacts
+      - name: Upload per-package artifacts
         uses: actions/upload-artifact@v4
         with:
           name: asar-windows-${{ matrix.arch }}
-          path: release/0.1.0/*.zip
+          path: |
+            release/0.1.0/7z-plugin-*.zip
+            release/0.1.0/asarfolder-*.zip
+            release/0.1.0/explorer-tools-*.zip
+            release/0.1.0/asar-lib-*.zip
           if-no-files-found: error
 
   release:
