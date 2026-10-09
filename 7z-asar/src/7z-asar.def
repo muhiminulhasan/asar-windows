@@ -1,0 +1,6 @@
+LIBRARY 7z-asar
+EXPORTS
+    CreateObject
+    GetHandlerProperty
+    GetHandlerProperty2
+    GetNumberOfFormats
